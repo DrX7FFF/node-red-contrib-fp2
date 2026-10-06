@@ -235,11 +235,15 @@ test("connects with stored credentials and emits only entity changes", { timeout
         assert.equal(client.args[2], pairing.port);
         assert.deepEqual(client.keys, [...mapping.entities.keys()]);
 
-        client.emit("event", { characteristics: [
+        const rawEvent = {
+            futureField: "preserved",
+            characteristics: [
             { aid: 1, iid: 10, value: 1 },
             { aid: 1, iid: 20, value: true },
             { aid: 1, iid: 30, value: 36.5 },
-        ] });
+            ],
+        };
+        client.emit("event", rawEvent);
         client.emit("event", { characteristics: [
             { aid: 1, iid: 10, value: true },
             { aid: 1, iid: 20, value: 1 },
@@ -251,6 +255,7 @@ test("connects with stored credentials and emits only entity changes", { timeout
             "fp2/illuminance",
         ]);
         assert.deepEqual(node.messages.map(message => message.payload), [true, true, 36.5]);
+        assert.ok(node.messages.every(message => assert.deepEqual(message.raw, rawEvent) === undefined));
         assert.ok(node.messages.every(message => message.kind && message.aid === "1" && message.iid));
     } finally {
         await new Promise(resolve => node.emit("close", false, resolve));

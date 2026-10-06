@@ -280,6 +280,7 @@ function register(RED, TestClient, testDependencies) {
                 const message = {
                     topic: entity.topic,
                     payload: value,
+                    raw: data,
                     kind: entity.kind,
                     entity: entity.name,
                     aid: entity.aid,

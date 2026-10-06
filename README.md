@@ -35,7 +35,7 @@ Each change emits one message. Presence payloads are booleans (`true` means occu
 | Named zone | `<prefix>/zone/<slug>` |
 | Illuminance, if unambiguous | `<prefix>/illuminance` |
 
-Messages include `msg.kind`, `msg.entity`, `msg.aid`, `msg.iid`, and an ISO-8601 `msg.timestamp`. Zone messages also include `msg.zone`. Ambiguous global presence or illuminance mappings are warned about rather than guessed. Only characteristics supporting HAP event notifications are subscribed.
+Messages include `msg.kind`, `msg.entity`, `msg.aid`, `msg.iid`, and an ISO-8601 `msg.timestamp`. Zone messages also include `msg.zone`. `msg.raw` contains the complete parsed event object emitted by `hap-controller`; when one event contains several characteristics, that same event object is attached to each corresponding output message. Ambiguous global presence or illuminance mappings are warned about rather than guessed. Only characteristics supporting HAP event notifications are subscribed.
 
 ## Docker
 

@@ -128,5 +128,5 @@
 <script type="text/html" data-help-name="fp2">
     <p>Entree HomeKit directe pour les changements de presence du FP2, sans MQTT.</p>
     <p>Utilisez Rechercher le FP2, selectionnez l'accessoire, puis saisissez le code HomeKit. Les donnees d'appairage sont memorisees comme credential Node-RED.</p>
-    <p>La sortie fournit un message par changement; l'etat initial est lu sans emission. N'utilisez pas simultanement le meme appairage dans la gateway Python.</p>
+    <p>La sortie fournit un message par changement; l'etat initial est lu sans emission. <code>msg.raw</code> contient l'evenement complet emis par le client HAP. N'utilisez pas simultanement le meme appairage dans la gateway Python.</p>
 </script>
