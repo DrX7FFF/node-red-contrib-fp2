@@ -6,3 +6,9 @@ sudo sysctl --system
 
 ## Vérifier dans la doc qu'on touche bien au settings.js sur les autres réglages
  Ensuite, `uiPort: 80` dans `settings.js`, ou `PORT=80` en variable d'environnement si ton `settings.js` lit `process.env.PORT`.
+
+
+
+
+❯ docker exec -w /data nodered node -e "require('dnssd').resolveService('Presence-Sensor-FP2-D61A._hap._tcp.local',{timeout:5000}).then(s=>console.log(s.addresses,s.port)).catch(e=>console.log('ERR',e.message))"
+[ '192.168.1.141', 'fe80::56ef:44ff:fea6:d61a' ] 62984
