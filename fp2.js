@@ -225,6 +225,44 @@ function registerAdminRoutes(RED, dependencies = {}) {
 function register(RED, TestClient, testDependencies) {
     registerAdminRoutes(RED, testDependencies);
     const lookup = testDependencies?.lookup || require("node:dns").promises.lookup;
+    function loadDnssd() {
+        try {
+            return require(require.resolve("dnssd", { paths: [require.resolve("hap-controller")] }));
+        } catch (_error) {
+            return require("dnssd");
+        }
+    }
+
+    // Resolution mDNS directe du FP2 deja appaire (adresse et port courants),
+    // sans parcourir le reseau : requetes SRV/TXT/A sur le nom memorise.
+    async function resolveByName(pairing) {
+        let dnssd;
+        try {
+            dnssd = testDependencies?.dnssd || loadDnssd();
+        } catch (_error) {
+            return undefined;
+        }
+        const net = require("node:net");
+        if (pairing.name) {
+            try {
+                const service = await dnssd.resolveService(`${pairing.name}._hap._tcp.local`, { timeout: 3000 });
+                const address = (service.addresses || []).find(item => net.isIPv4(item));
+                if (address) return { address, port: service.port };
+            } catch (_error) {
+                // essai suivant
+            }
+        }
+        const hostname = String(pairing.host || "").replace(/\.$/, "");
+        if (hostname) {
+            try {
+                const { answer } = await dnssd.resolve(hostname, "A", { timeout: 3000 });
+                if (answer?.address) return { address: answer.address };
+            } catch (_error) {
+                // repli sur la resolution systeme
+            }
+        }
+        return undefined;
+    }
 
     function FP2Node(config) {
         RED.nodes.createNode(this, config);
@@ -313,15 +351,19 @@ function register(RED, TestClient, testDependencies) {
                 return;
             }
             try {
-                const host = (config.host || "").trim() || pairing.host || pairing.address;
+                const accessoryId = pairing.accessoryId || pairing.AccessoryPairingID;
+                const manualHost = (config.host || "").trim();
+                const found = manualHost ? undefined : await resolveByName(pairing);
+                if (stopped || token !== attempt) return;
+                const host = manualHost || found?.address || pairing.host || pairing.address;
                 const address = require("node:net").isIP(host)
                     ? host
                     : (await lookup(host, { family: 4 })).address;
                 if (stopped || token !== attempt) return;
                 const HttpClient = TestClient || require("hap-controller").HttpClient;
-                current = new HttpClient(pairing.accessoryId || pairing.AccessoryPairingID,
+                current = new HttpClient(accessoryId,
                     address,
-                    Number(config.port || pairing.port), pairing, {
+                    Number(config.port || found?.port || pairing.port), pairing, {
                         usePersistentConnections: true,
                         subscriptionsUseSameConnection: true,
                     });
@@ -370,10 +412,10 @@ function register(RED, TestClient, testDependencies) {
     }
 
     RED.nodes.registerType("fp2", FP2Node, {
-            credentials: {
-                pairing: { type: "password" }
-            }
-        });
+        credentials: {
+            pairing: { type: "password" }
+        }
+    });
 }
 
 module.exports = register;
