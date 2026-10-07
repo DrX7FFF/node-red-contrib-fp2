@@ -317,6 +317,7 @@ function register(RED) {
                 client = current;
                 const database = await current.getAccessories();
                 if (stopped || token !== attempt) return;
+                node.send({ payload: database.accessories, kind: "base" });
                 const mapping = buildEntities(database, prefix);
                 entities = mapping.entities;
                 for (const warning of mapping.warnings) node.warn(warning);
