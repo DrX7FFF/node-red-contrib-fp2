@@ -35,6 +35,33 @@ function response() {
     };
 }
 
+function makeRuntime(Client, dependencies, signals = new EventEmitter()) {
+    let constructor;
+    const RED = {
+        auth: { needsPermission: () => (_req, _res, next) => next() },
+        httpAdmin: { get() {}, post() {} },
+        nodes: {
+            registerType(name, implementation) { assert.equal(name, "fp2"); constructor = implementation; },
+            createNode(node, config) {
+                const events = new EventEmitter();
+                node.credentials = config.credentials;
+                node.on = events.on.bind(events);
+                node.emit = events.emit.bind(events);
+                node.messages = [];
+                node.statuses = [];
+                node.send = message => node.messages.push(message);
+                node.warn = message => signals.emit("warning", message);
+                node.status = status => {
+                    node.statuses.push(status);
+                    if (status.fill === "green") signals.emit("ready");
+                };
+            },
+        },
+    };
+    register(RED, Client, dependencies);
+    return constructor;
+}
+
 test("registers pairing routes behind the Node-RED flow-write permission", async () => {
     let closed = false;
     let startedPin;
@@ -49,6 +76,7 @@ test("registers pairing routes behind the Node-RED flow-write permission", async
     const admin = makeAdmin({
         discoveryTimeout: 1,
         createDiscovery: () => ({
+            browser: { list: () => [{ txt: { id: service.id }, host: "fp2.local." }] },
             start() {},
             stop() {},
             list: () => [service],
@@ -85,7 +113,8 @@ test("registers pairing routes behind the Node-RED flow-write permission", async
         body: { token: discovered.devices[0].token, pin: "123-45-678" },
     }, pairingResponse);
     assert.equal(startedPin, "123-45-678");
-    assert.equal(pairingResponse.body.pairing.address, service.address);
+    assert.equal(pairingResponse.body.pairing.host, "fp2.local.");
+    assert.equal(Object.hasOwn(pairingResponse.body.pairing, "address"), false);
     assert.equal(pairingResponse.body.pairing.port, service.port);
     assert.equal(closed, true);
 });
@@ -160,9 +189,8 @@ test("does not guess an ambiguous global presence or illuminance sensor", () => 
     assert.equal(mapping.warnings.length, 2);
 });
 
-test("connects with stored credentials and emits only entity changes", { timeout: 5000 }, async () => {
+test("resolves the stored hostname on connection and reconnection and emits only entity changes", { timeout: 5000 }, async () => {
     const signals = new EventEmitter();
-    let constructor;
     let client;
     const database = { accessories: [{ aid: 1, services: [
         { characteristics: [{ type: "23", value: "Global Presence" }, { type: "71", iid: 10, perms: ["ev"] }] },
@@ -183,28 +211,20 @@ test("connects with stored credentials and emits only entity changes", { timeout
         async subscribeCharacteristics(keys) { this.keys = keys; return {}; }
         async close() { this.closed = true; }
     }
-    const RED = {
-        auth: { needsPermission: () => (_req, _res, next) => next() },
-        httpAdmin: { get() {}, post() {} },
-        nodes: {
-            registerType(name, implementation) { assert.equal(name, "fp2"); constructor = implementation; },
-            createNode(node, config) {
-                const events = new EventEmitter();
-                node.credentials = config.credentials;
-                node.on = events.on.bind(events);
-                node.emit = events.emit.bind(events);
-                node.messages = [];
-                node.send = message => node.messages.push(message);
-                node.warn = message => signals.emit("warning", message);
-                node.status = status => { if (status.fill === "green") signals.emit("ready"); };
-            },
+    let lookups = 0;
+    const constructor = makeRuntime(FakeClient, {
+        createDiscovery: () => ({}),
+        lookup: async (host, options) => {
+            assert.equal(host, "fp2.local.");
+            assert.deepEqual(options, { family: 4 });
+            lookups += 1;
+            return { address: lookups === 1 ? "192.0.2.20" : "192.0.2.21" };
         },
-    };
-    register(RED, FakeClient, { createDiscovery: () => ({}) });
+    }, signals);
     const ready = once(signals, "ready");
     const pairing = {
         AccessoryPairingID: "AA:BB:CC:DD:EE:FF",
-        address: "192.0.2.20",
+        host: "fp2.local.",
         port: 12345,
     };
     const node = new constructor({
@@ -215,7 +235,7 @@ test("connects with stored credentials and emits only entity changes", { timeout
         await ready;
         assert.equal(node.messages.length, 0);
         assert.equal(client.args[0], pairing.AccessoryPairingID);
-        assert.equal(client.args[1], pairing.address);
+        assert.equal(client.args[1], "192.0.2.20");
         assert.equal(client.args[2], pairing.port);
         assert.deepEqual(client.args[3], pairing);
         assert.deepEqual(client.keys, [...mapping.entities.keys()]);
@@ -242,8 +262,110 @@ test("connects with stored credentials and emits only entity changes", { timeout
         assert.deepEqual(node.messages.map(message => message.payload), [true, true, 36.5]);
         assert.ok(node.messages.every(message => assert.deepEqual(message.raw, rawEvent) === undefined));
         assert.ok(node.messages.every(message => message.kind && message.aid === "1" && message.iid));
+        const previousClient = client;
+        const reconnected = once(signals, "ready");
+        previousClient.emit("event-disconnect");
+        await reconnected;
+        assert.equal(lookups, 2);
+        assert.equal(previousClient.closed, true);
+        assert.equal(client.args[1], "192.0.2.21");
+        assert.equal(node.messages.length, 3);
     } finally {
         await new Promise(resolve => node.emit("close", false, resolve));
     }
     assert.equal(client.closed, true);
+});
+
+test("keeps legacy IP credentials and prioritizes manual IP and hostname overrides", async context => {
+    for (const scenario of [
+        { name: "legacy IP", config: {}, address: "192.0.2.10", calls: 0 },
+        { name: "manual IP", config: { host: "192.0.2.30", port: "54321" }, address: "192.0.2.30", calls: 0 },
+        { name: "manual hostname", config: { host: "override.local" }, address: "192.0.2.40", calls: 1 },
+    ]) {
+        await context.test(scenario.name, async () => {
+            const signals = new EventEmitter();
+            let args;
+            let lookups = 0;
+            class FakeClient extends EventEmitter {
+                constructor(...values) { super(); args = values; }
+                async getAccessories() { throw new Error("test stop"); }
+                async close() {}
+            }
+            const constructor = makeRuntime(FakeClient, {
+                lookup: async host => {
+                    assert.equal(host, "override.local");
+                    lookups += 1;
+                    return { address: "192.0.2.40" };
+                },
+            }, signals);
+            const warned = once(signals, "warning");
+            const node = new constructor({
+                ...scenario.config,
+                credentials: { pairing: JSON.stringify({
+                    accessoryId: "AA:BB:CC:DD:EE:FF",
+                    address: "192.0.2.10",
+                    port: 12345,
+                }) },
+            });
+            try {
+                await warned;
+                assert.equal(args[1], scenario.address);
+                assert.equal(args[2], Number(scenario.config.port || 12345));
+                assert.equal(lookups, scenario.calls);
+            } finally {
+                await new Promise(resolve => node.emit("close", false, resolve));
+            }
+        });
+    }
+});
+
+test("retries failed name resolution through the existing warning path", { timeout: 5000 }, async () => {
+    const signals = new EventEmitter();
+    let lookups = 0;
+    let clients = 0;
+    class FakeClient extends EventEmitter {
+        constructor() { super(); clients += 1; }
+        async getAccessories() { throw new Error("test stop"); }
+        async close() {}
+    }
+    const constructor = makeRuntime(FakeClient, {
+        lookup: async () => {
+            lookups += 1;
+            if (lookups === 1) throw Object.assign(new Error("not found"), { code: "ENOTFOUND" });
+            return { address: "192.0.2.50" };
+        },
+    }, signals);
+    const warned = once(signals, "warning");
+    const node = new constructor({
+        credentials: { pairing: JSON.stringify({ host: "fp2.local", port: 12345 }) },
+    });
+    try {
+        assert.deepEqual(await warned, ["Erreur FP2 : ENOTFOUND"]);
+        assert.equal(clients, 0);
+        assert.equal(node.statuses.at(-1).text, "deconnecte");
+        const retried = once(signals, "warning");
+        assert.deepEqual(await retried, ["test stop"]);
+        assert.equal(lookups, 2);
+        assert.equal(clients, 1);
+        assert.equal(node.messages.length, 0);
+    } finally {
+        await new Promise(resolve => node.emit("close", false, resolve));
+    }
+});
+
+test("does not open a connection when closed during name resolution", async () => {
+    let finishLookup;
+    let clients = 0;
+    const lookupDone = new Promise(resolve => { finishLookup = resolve; });
+    const constructor = makeRuntime(class { constructor() { clients += 1; } }, {
+        lookup: () => lookupDone,
+    });
+    const node = new constructor({
+        credentials: { pairing: JSON.stringify({ host: "fp2.local", port: 12345 }) },
+    });
+    await new Promise(resolve => node.emit("close", false, resolve));
+    finishLookup({ address: "192.0.2.60" });
+    await lookupDone;
+    assert.equal(clients, 0);
+    assert.equal(node.messages.length, 0);
 });

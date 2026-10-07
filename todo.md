@@ -36,3 +36,55 @@ et localhost à la place de mosquitto et deconz dans tes nœuds de config.
 
 ## Vérification des ports 
 (ss -tlnp après le démarrage te montre tout ce qui écoute).
+
+
+
+
+
+# Tester le comportement du FP2 :
+Le test utile est de comparer **avant et après appairage**, depuis l’hôte Linux de Node-RED.
+
+**1. Découverte HomeKit**
+```bash
+avahi-browse -rt _hap._tcp
+```
+
+Repère le FP2 et conserve :
+- le nom de l’instance du service ;
+- le nom d’hôte `.local` ;
+- l’IP et le port ;
+- le champ TXT `id` et la valeur `sf`.
+
+Habituellement, `sf=1` indique un accessoire non appairé, et `sf=0` un accessoire appairé.
+
+**2. Résolution ciblée du nom d’hôte**
+Après appairage, en remplaçant le nom par celui obtenu :
+```bash
+avahi-resolve-host-name -4 NOM-HOTE.local
+```
+
+Cela vérifie la résolution vers l’IP, mais **pas le port ni l’ID HomeKit**.
+
+**3. Refaire la découverte après appairage**
+```bash
+avahi-browse -rt _hap._tcp
+```
+
+| Résultat après appairage | Conclusion |
+| --- | --- |
+| FP2 visible, même `id`, `sf=0` | Découverte toujours possible ; seul le nouvel appairage est indisponible |
+| FP2 absent, mais résolution `.local` réussie | Résolution d’hôte envisageable ; port conservé et identité vérifiée par HAP |
+| FP2 absent et résolution échouée | Aucun résultat mDNS exploitable dans ce test |
+
+**Attention au cache Avahi**
+Une résolution réussie immédiatement après l’appairage peut venir du cache. Pour vérifier une réponse réelle, utilise idéalement une autre machine avec un cache vierge, ou surveille les échanges :
+
+```bash
+sudo tcpdump -ni INTERFACE -vvv 'udp port 5353'
+```
+
+Puis relance la résolution. Cherche une **réponse du FP2** contenant son enregistrement `A`, pas seulement la requête émise.
+
+Enfin, répète le test après un redémarrage du FP2 et, idéalement, un changement d’IP DHCP. C’est ce dernier scénario qui valide réellement la stratégie de reconnexion.
+
+**Limite :** `avahi-browse` fait une découverte générale et `avahi-resolve-host-name` résout un hôte. Ces commandes ne testent pas directement la requête ciblée `SRV/TXT` d’une instance HomeKit que nous envisagions.

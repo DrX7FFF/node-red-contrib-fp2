@@ -141,8 +141,14 @@ function registerAdminRoutes(RED, dependencies = {}) {
         discovery.start();
         setTimeout(async () => {
             try {
+                const hosts = new Map((discovery.browser?.list() || []).map(service =>
+                    [service.txt.id, service.host]));
+                const services = discovery.list().map(service => ({
+                    ...service,
+                    host: service.host || hosts.get(service.id),
+                }));
                 discovery.stop();
-                const devices = await Promise.all(discovery.list().map(async service => {
+                const devices = await Promise.all(services.map(async service => {
                     const token = require("node:crypto").randomBytes(24).toString("hex");
                     const pairMethod = await discovery.getPairMethod(service);
                     discovered.set(token, {
@@ -188,6 +194,9 @@ function registerAdminRoutes(RED, dependencies = {}) {
         let client;
         try {
             const service = entry.service;
+            if (!service.host) {
+                throw new Error("Nom d'hote FP2 absent de la decouverte.");
+            }
             client = clientFactory(service.id, service.address, service.port);
             const pairingData = await client.startPairing(entry.pairMethod);
             await client.finishPairing(pairingData, pin);
@@ -199,7 +208,7 @@ function registerAdminRoutes(RED, dependencies = {}) {
                 pairing: {
                     ...pairing,
                     accessoryId: service.id,
-                    address: service.address,
+                    host: service.host,
                     port: service.port,
                     name: service.name,
                 },
@@ -215,6 +224,7 @@ function registerAdminRoutes(RED, dependencies = {}) {
 
 function register(RED, TestClient, testDependencies) {
     registerAdminRoutes(RED, testDependencies);
+    const lookup = testDependencies?.lookup || require("node:dns").promises.lookup;
 
     function FP2Node(config) {
         RED.nodes.createNode(this, config);
@@ -303,9 +313,14 @@ function register(RED, TestClient, testDependencies) {
                 return;
             }
             try {
+                const host = (config.host || "").trim() || pairing.host || pairing.address;
+                const address = require("node:net").isIP(host)
+                    ? host
+                    : (await lookup(host, { family: 4 })).address;
+                if (stopped || token !== attempt) return;
                 const HttpClient = TestClient || require("hap-controller").HttpClient;
                 current = new HttpClient(pairing.accessoryId || pairing.AccessoryPairingID,
-                    (config.host || "").trim() || pairing.address,
+                    address,
                     Number(config.port || pairing.port), pairing, {
                         usePersistentConnections: true,
                         subscriptionsUseSameConnection: true,

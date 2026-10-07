@@ -23,7 +23,11 @@ HomeKit Pair Setup is available only when discovery reports the accessory as ava
 
 ## Configuration and messages
 
-The node supports an optional name, IP address and HAP port override, and topic prefix (default `fp2`). The discovery result supplies the device ID, address, and port for a new pairing.
+The node supports an optional name, hostname or IP address and HAP port override, and topic prefix (default `fp2`). Discovery supplies the address used during pairing; new pairings store the DNS-SD hostname, device ID, and HAP port rather than the discovered IP address.
+
+Before every connection and reconnection, the hostname is resolved to an IPv4 address using Node.js `dns.lookup` and the operating system's resolver. No new service discovery is performed during reconnection. A manual hostname or IP address takes priority; literal IP addresses bypass name resolution. Older credentials containing only an IP address remain supported. To use name resolution with an existing pairing, enter the FP2's actual hostname (for example `fp2.local`) in **Hote / IP** without pairing again.
+
+Resolution failures use the existing disconnect status and warning mechanism, with retries after 1, 2, 4, 8, 16, 32, then 60 seconds. Successful connection resets the retry delay. Connection errors do not produce output messages.
 
 Each change emits one message. Presence payloads are booleans (`true` means occupied); illuminance payloads are numeric. Initial values are read silently and repeated values are suppressed.
 
@@ -38,6 +42,8 @@ Messages include `msg.kind`, `msg.entity`, `msg.aid`, `msg.iid`, and an ISO-8601
 ## Docker
 
 Install the package in the persistent Node-RED user directory (commonly `/data`), and preserve Node-RED's credential file and `credentialSecret` across container recreation. The Node-RED process must have network access to the FP2; host networking or working mDNS forwarding may be required for discovery. If multicast discovery is unavailable, use the address and port override after pairing the accessory on a network where discovery works.
+
+DNS-SD discovery and system hostname resolution are separate mechanisms. Verify `.local` resolution inside the Node-RED container itself, for example with `node -e 'require("node:dns").lookup("fp2.local", { family: 4 }, console.log)'`. Successful discovery or hostname resolution on the Docker host alone does not guarantee that the container's system resolver supports mDNS.
 
 ## Development tests
 
