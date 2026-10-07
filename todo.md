@@ -1,26 +1,5 @@
 ## Correction module Bug
 
-Oui, `sf=0` signifie que le FP2 est appairé. Le problème de sauvegarde vient bien d'un bug dans `fp2.html`.
-
-Node-RED enregistre un credential en cherchant un champ dont l'id est `node-input-` suivi du nom du credential. Ton credential s'appelle `pairing`, donc l'id attendu est `node-input-pairing`, alors que ton code utilise `node-input-credentials-pairing`. Résultat : le champ n'est jamais lu, rien n'est stocké, et le nœud affiche "appairage requis".
-
-Dans `fp2.html`, trois endroits à changer :
-
-```js
-$("#node-input-pairing")
-    .val(JSON.stringify(response.pairing))
-    .trigger("change");
-```
-
-```html
-<label for="node-input-pairing">Pairing existant</label>
-<input type="password" id="node-input-pairing" autocomplete="new-password" placeholder="Coller l'objet aiohomekit JSON (optionnel)">
-```
-
-Il faut ensuite redémarrer Node-RED (`docker restart nodered`) et recharger la page du navigateur (Ctrl+F5).
-
-Le pairing généré lors de ton essai est perdu, car il n'a jamais été enregistré. Le FP2 est maintenant appairé à une clé que plus personne ne possède. Pour recommencer, il faut le réinitialiser (appui long sur son bouton reset), puis relancer l'appairage depuis l'IHM. Pense à cliquer sur Déployer juste après, sinon le credential n'est pas stocké.
-
 ## Supprimer l'option de récupération d'un JSON
 
 ## Supprimer la sauvegarde de l'IP (afficher l'information seulement)

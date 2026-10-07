@@ -119,7 +119,11 @@ test("editor declares pairing as a Node-RED credential and provides pairing cont
     assert.equal(definition.credentials.pairing.type, "password");
     assert.equal(definition.inputs, 0);
     assert.equal(definition.outputs, 1);
-    assert.ok(html.includes('id="node-input-credentials-pairing"'));
+    const pairingInputId = `node-input-${Object.keys(definition.credentials)[0]}`;
+    assert.ok(html.includes(`id="${pairingInputId}"`));
+    assert.ok(html.includes(`for="${pairingInputId}"`));
+    assert.ok(script[1].includes(`$("#${pairingInputId}")`));
+    assert.ok(!html.includes("node-input-credentials-pairing"));
     assert.ok(html.includes("fp2/pairing/discover"));
     assert.ok(html.includes("fp2/pairing/pair"));
 });

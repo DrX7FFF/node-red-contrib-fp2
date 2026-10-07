@@ -67,7 +67,7 @@
                     data: JSON.stringify({ token, pin }),
                 })
                     .done(function(response) {
-                        $("#node-input-credentials-pairing")
+                        $("#node-input-pairing")
                             .val(JSON.stringify(response.pairing))
                             .trigger("change");
                         $("#node-fp2-pin").val("");
@@ -119,8 +119,8 @@
         <span id="node-fp2-pairing-result" role="status"></span>
     </div>
     <div class="form-row">
-        <label for="node-input-credentials-pairing">Pairing existant</label>
-        <input type="password" id="node-input-credentials-pairing" autocomplete="new-password" placeholder="Coller l'objet aiohomekit JSON (optionnel)">
+        <label for="node-input-pairing">Pairing existant</label>
+        <input type="password" id="node-input-pairing" autocomplete="new-password" placeholder="Coller l'objet aiohomekit JSON (optionnel)">
     </div>
     <div class="form-tips">Pour un accessoire deja appaire, collez ici l'objet de son alias aiohomekit. Cette valeur reste un credential Node-RED.</div>
 </script>
