@@ -4,13 +4,6 @@
         color: "#a6bbcf",
         defaults: {
             name: { value: "" },
-            host: { value: "" },
-            port: {
-                value: "",
-                validate: function(value) {
-                    return value === "" || (/^\d+$/.test(value) && Number(value) >= 1 && Number(value) <= 65535);
-                }
-            },
             topicPrefix: { value: "fp2", required: true }
         },
         credentials: {
@@ -25,12 +18,12 @@
             const $select = $("#node-fp2-accessory");
             const $state = $("#node-fp2-pairing-state");
             const $result = $("#node-fp2-pairing-result");
-            $state.text("Le pairing sera conserve comme credential Node-RED.");
+            $state.text("Pairing will be stored as a Node-RED credential.");
 
             $("#node-fp2-discover").on("click", function() {
                 const button = $(this);
                 button.prop("disabled", true);
-                $result.text("Recherche en cours...");
+                $result.text("Searching...");
                 $select.empty();
                 $.getJSON("fp2/pairing/discover")
                     .done(function(response) {
@@ -40,10 +33,10 @@
                             if (!device.availableToPair) option.prop("disabled", true);
                             $select.append(option);
                         }
-                        $result.text(response.devices?.length ? "Selectionnez un accessoire disponible." : "Aucun accessoire trouve.");
+                        $result.text(response.devices?.length ? "Select an available accessory." : "No accessory found.");
                     })
                     .fail(function(xhr) {
-                        $result.text(xhr.responseJSON?.error || "Echec de la decouverte.");
+                        $result.text(xhr.responseJSON?.error || "Discovery failed.");
                     })
                     .always(function() {
                         button.prop("disabled", false);
@@ -55,11 +48,11 @@
                 const pin = $("#node-fp2-pin").val();
                 const token = $select.val();
                 if (!token) {
-                    $result.text("Recherchez et selectionnez un FP2 disponible.");
+                    $result.text("Search for and select an available FP2.");
                     return;
                 }
                 button.prop("disabled", true);
-                $result.text("Appairage en cours...");
+                $result.text("Pairing...");
                 $.ajax({
                     url: "fp2/pairing/pair",
                     method: "POST",
@@ -71,11 +64,11 @@
                             .val(JSON.stringify(response.pairing))
                             .trigger("change");
                         $("#node-fp2-pin").val("");
-                        $state.text("Appairage effectue; deployez pour enregistrer le credential.");
-                        $result.text("Le pairing est pret pour ce noeud.");
+                        $state.text("Paired; deploy to save the credential.");
+                        $result.text("Pairing is ready for this node.");
                     })
                     .fail(function(xhr) {
-                        $result.text(xhr.responseJSON?.error || "Echec de l'appairage.");
+                        $result.text(xhr.responseJSON?.error || "Pairing failed.");
                     })
                     .always(function() {
                         button.prop("disabled", false);
@@ -87,42 +80,33 @@
 
 <script type="text/html" data-template-name="fp2">
     <div class="form-row">
-        <label for="node-input-name"><i class="fa fa-tag"></i> Nom</label>
-        <input type="text" id="node-input-name" placeholder="FP2 salon">
+        <label for="node-input-name"><i class="fa fa-tag"></i> Name</label>
+        <input type="text" id="node-input-name" placeholder="FP2 living room">
     </div>
     <div class="form-row">
-        <label for="node-input-host"><i class="fa fa-globe"></i> Hote / IP</label>
-        <input type="text" id="node-input-host" placeholder="Automatique, ou nom.local / IP">
-    </div>
-    <div class="form-row">
-        <label for="node-input-port"><i class="fa fa-plug"></i> Port HAP</label>
-        <input type="text" id="node-input-port" placeholder="Automatique apres decouverte">
-    </div>
-    <div class="form-row">
-        <label for="node-input-topicPrefix"><i class="fa fa-list"></i> Prefixe</label>
+        <label for="node-input-topicPrefix"><i class="fa fa-list"></i> Prefix</label>
         <input type="text" id="node-input-topicPrefix" placeholder="fp2">
     </div>
     <div class="form-row">
-        <label>Appairage</label>
-        <span id="node-fp2-pairing-state">Non appaire</span>
+        <label>Pairing</label>
+        <span id="node-fp2-pairing-state">Not paired</span>
     </div>
     <div class="form-row">
-        <button type="button" class="red-ui-button" id="node-fp2-discover">Rechercher le FP2</button>
-        <select id="node-fp2-accessory" style="width: 100%; margin-top: 8px;" aria-label="Accessoire FP2"></select>
+        <button type="button" class="red-ui-button" id="node-fp2-discover">Search for FP2</button>
+        <select id="node-fp2-accessory" style="width: 100%; margin-top: 8px;" aria-label="FP2 accessory"></select>
     </div>
     <div class="form-row">
-        <label for="node-fp2-pin">Code HomeKit</label>
+        <label for="node-fp2-pin">HomeKit code</label>
         <input type="password" id="node-fp2-pin" autocomplete="off" placeholder="XXX-XX-XXX">
     </div>
     <div class="form-row">
-        <button type="button" class="red-ui-button" id="node-fp2-pair">Appairer et memoriser</button>
+        <button type="button" class="red-ui-button" id="node-fp2-pair">Pair and save</button>
         <span id="node-fp2-pairing-result" role="status"></span>
     </div>
     <input type="hidden" id="node-input-pairing">
 </script>
 
 <script type="text/html" data-help-name="fp2">
-    <p>Entree HomeKit directe pour les changements de presence du FP2, sans MQTT.</p>
-    <p>Utilisez Rechercher le FP2, selectionnez l'accessoire, puis saisissez le code HomeKit. Les donnees d'appairage sont memorisees comme credential Node-RED.</p>
-    <p>La sortie fournit un message par changement; l'etat initial est lu sans emission. <code>msg.raw</code> contient l'evenement complet emis par le client HAP.</p>
+    <p>Use Search for FP2, select the accessory, then enter the HomeKit code.</p>
+    <p>The output sends one message per change; the initial state is read without emitting.</p>
 </script>

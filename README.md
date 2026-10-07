@@ -1,6 +1,6 @@
 # node-red-contrib-fp2
 
-Node-RED input node that pairs directly with an Aqara FP2 over HomeKit IP and emits presence and illuminance changes into a flow. Python and MQTT are not runtime dependencies.
+Node-RED input node that pairs directly with an Aqara FP2 over HomeKit IP and emits presence and illuminance changes into a flow.
 
 ## Requirements and installation
 
@@ -13,7 +13,7 @@ Install from the package directory in the Node-RED user directory:
 npm install /path/to/node-red-contrib-fp2
 ```
 
-Restart Node-RED, add the **FP2** input node, open its settings, and choose **Rechercher le FP2**. Select an accessory marked available for pairing, enter its HomeKit setup code, and choose **Appairer et memoriser**. Deploy the flow to persist the generated pairing as a Node-RED credential and start the HAP connection.
+Restart Node-RED, add the **FP2** input node, open its settings, and choose **Search for FP2**. Select an accessory marked available for pairing, enter its HomeKit setup code, and choose **Pair and save**. Deploy the flow to persist the generated pairing as a Node-RED credential and start the HAP connection.
 
 The pairing code is sent only to the local Node-RED admin endpoint during setup and is not logged or stored. Long-term HomeKit credentials are stored in the node's password credential field, not in the exported flow. Protect the Node-RED editor with authentication and HTTPS when accessed over an untrusted network. Back up the Node-RED credential store together with the configured `credentialSecret`; without that secret, encrypted credentials cannot be recovered.
 
@@ -23,11 +23,13 @@ HomeKit Pair Setup is available only when discovery reports the accessory as ava
 
 ## Configuration and messages
 
-The node supports an optional name, hostname or IP address and HAP port override, and topic prefix (default `fp2`). Discovery supplies the address used during pairing; new pairings store the DNS-SD hostname, device ID, and HAP port rather than the discovered IP address.
+The node has two settings: a name (editor label) and a topic prefix (default `fp2`). There is no host or port setting.
 
-Before every connection and reconnection, the hostname is resolved to an IPv4 address using Node.js `dns.lookup` and the operating system's resolver. No new service discovery is performed during reconnection. A manual hostname or IP address takes priority; literal IP addresses bypass name resolution. Older credentials containing only an IP address remain supported. To use name resolution with an existing pairing, enter the FP2's actual hostname (for example `fp2.local`) in **Hote / IP** without pairing again.
+Pairing stores, in the encrypted `pairing` credential, the HomeKit long-term data (`AccessoryPairingID`, `AccessoryLTPK`, controller ID and keys) and the FP2's DNS-SD service name (for example `Presence-Sensor-FP2-D61A`). No IP address or port is stored.
 
-Resolution failures use the existing disconnect status and warning mechanism, with retries after 1, 2, 4, 8, 16, 32, then 60 seconds. Successful connection resets the retry delay. Connection errors do not produce output messages.
+Before every connection and reconnection, the node resolves the service `<name>._hap._tcp.local` with DNS-SD (SRV/TXT/A) to get the current IPv4 address and HAP port. The FP2 answers these targeted queries at any time, whereas it answers service browsing only shortly after it boots, so no browsing is performed after pairing. The resolution timeout is `RESOLVE_TIMEOUT_MS` (20 s) at the top of `fp2.js`.
+
+If the resolution fails, the node shows the disconnected status, logs a warning, and retries after 1, 2, 4, 8, 16, 32, then 60 seconds. Successful connection resets the retry delay. Connection errors do not produce output messages.
 
 Each change emits one message. Presence payloads are booleans (`true` means occupied); illuminance payloads are numeric. Initial values are read silently and repeated values are suppressed.
 
@@ -41,13 +43,17 @@ Messages include `msg.kind`, `msg.entity`, `msg.aid`, `msg.iid`, and an ISO-8601
 
 ## Docker
 
-Install the package in the persistent Node-RED user directory (commonly `/data`), and preserve Node-RED's credential file and `credentialSecret` across container recreation. The Node-RED process must have network access to the FP2; host networking or working mDNS forwarding may be required for discovery. If multicast discovery is unavailable, use the address and port override after pairing the accessory on a network where discovery works.
+Install the package in the persistent Node-RED user directory (commonly `/data`), and preserve Node-RED's credential file and `credentialSecret` across container recreation. The container must receive mDNS multicast traffic (host networking is the simplest option).
 
-DNS-SD discovery and system hostname resolution are separate mechanisms. Verify `.local` resolution inside the Node-RED container itself, for example with `node -e 'require("node:dns").lookup("fp2.local", { family: 4 }, console.log)'`. Successful discovery or hostname resolution on the Docker host alone does not guarantee that the container's system resolver supports mDNS.
+To check service resolution from inside the container:
+
+```sh
+docker exec -w /data nodered node -e "require('dnssd').resolveService('Presence-Sensor-FP2-D61A._hap._tcp.local',{timeout:20000}).then(s=>console.log(s.addresses,s.port)).catch(e=>console.log('ERR',e.message))"
+```
 
 ## Development tests
 
-The tests use fake HAP discovery and clients; they do not pair with or contact a physical FP2.
+The tests replace `hap-controller` and `dnssd` at module load time; they do not pair with or contact a physical FP2.
 
 ```sh
 npm install --ignore-scripts
@@ -58,3 +64,18 @@ The implementation uses the IP transport from `hap-controller`. That dependency 
 
 Real-device pairing, notification delivery, zone changes, illuminance, and reconnect behavior still need validation with an FP2.
 Connect your Node Red to your FP2
+
+
+**1. Découverte HomeKit**
+Il faut rebooter le FP2 sinon il ne répond pas à la découverte de service
+```bash
+avahi-browse -rt _hap._tcp
+```
+`sf=1` indique un accessoire non appairé, et `sf=0` un accessoire appairé.
+
+
+**2. Résolution ciblée du nom d’hôte**
+Après appairage, en remplaçant le nom par celui obtenu :
+```bash
+avahi-resolve-host-name -4 NOM-HOTE.local
+```

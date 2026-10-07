@@ -1,6 +1,15 @@
 "use strict";
 
 const PAIRING_CODE = /^\d{3}-\d{2}-\d{3}$/;
+const RESOLVE_TIMEOUT_MS = 20000;
+const PAIRING_FIELDS = [
+    "name",
+    "AccessoryPairingID",
+    "AccessoryLTPK",
+    "iOSDevicePairingID",
+    "iOSDeviceLTSK",
+    "iOSDeviceLTPK",
+];
 const GLOBAL_NAMES = new Set([
     "global occupancy",
     "global presence",
@@ -70,9 +79,9 @@ function buildEntities(database, prefix = "fp2") {
     } else if (namedGlobal.length === 1) {
         globalSensor = namedGlobal[0];
     } else if (namedGlobal.length > 1) {
-        warnings.push("Plusieurs capteurs portent un nom de presence globale.");
+        warnings.push("Several sensors have a global presence name.");
     } else if (occupancy.length > 0) {
-        warnings.push("Capteur de presence global ambigu; aucun topic global n'a ete attribue.");
+        warnings.push("Ambiguous global presence sensor; no global topic assigned.");
     }
 
     function addEntity(candidate, kind, topic, extra = {}) {
@@ -111,7 +120,7 @@ function buildEntities(database, prefix = "fp2") {
         if (namedGlobalLight.length === 1) {
             addEntity(namedGlobalLight[0], "illuminance", `${prefix}/illuminance`);
         } else {
-            warnings.push("Plusieurs capteurs de luminosite sont exposes; le topic principal reste ambigu.");
+            warnings.push("Several illuminance sensors exposed; main topic is ambiguous.");
             for (const candidate of illuminance) {
                 unresolved.push({ aid: candidate.aid, iid: candidate.iid, kind: "illuminance", name: candidate.name || null });
             }
@@ -121,23 +130,15 @@ function buildEntities(database, prefix = "fp2") {
     return { entities, warnings, unresolved };
 }
 
-function registerAdminRoutes(RED, dependencies = {}) {
+function registerAdminRoutes(RED) {
     const discovered = new Map();
-    const discoveryTimeout = dependencies.discoveryTimeout || 5000;
-    const discoveryFactory = dependencies.createDiscovery || (() => {
-        const { IPDiscovery } = require("hap-controller");
-        return new IPDiscovery();
-    });
-    const clientFactory = dependencies.createClient || ((id, address, port, pairing) => {
-        const { HttpClient } = require("hap-controller");
-        return new HttpClient(id, address, port, pairing);
-    });
     const permission = RED.auth?.needsPermission
         ? RED.auth.needsPermission("flows.write")
         : (req, res, next) => next();
 
     RED.httpAdmin.get("/fp2/pairing/discover", permission, (_req, res) => {
-        const discovery = discoveryFactory();
+        const { IPDiscovery } = require("hap-controller");
+        const discovery = new IPDiscovery();
         discovery.start();
         setTimeout(async () => {
             try {
@@ -169,9 +170,9 @@ function registerAdminRoutes(RED, dependencies = {}) {
                 res.json({ devices });
             } catch (_error) {
                 discovery.stop();
-                res.status(500).json({ error: "Echec de la decouverte HAP." });
+                res.status(500).json({ error: "HAP discovery failed." });
             }
-        }, discoveryTimeout);
+        }, 5000);
     });
 
     RED.httpAdmin.post("/fp2/pairing/pair", permission, async (req, res) => {
@@ -179,25 +180,26 @@ function registerAdminRoutes(RED, dependencies = {}) {
         const entry = discovered.get(token);
         if (!entry || entry.expiresAt < Date.now()) {
             discovered.delete(token);
-            res.status(400).json({ error: "Relancez la decouverte avant l'appairage." });
+            res.status(400).json({ error: "Run discovery again before pairing." });
             return;
         }
         if (!entry.service.availableToPair) {
-            res.status(409).json({ error: "Cet accessoire n'est pas disponible pour un nouvel appairage." });
+            res.status(409).json({ error: "This accessory is not available for pairing." });
             return;
         }
         if (typeof pin !== "string" || !PAIRING_CODE.test(pin)) {
-            res.status(400).json({ error: "Le code HomeKit doit respecter le format XXX-XX-XXX." });
+            res.status(400).json({ error: "The HomeKit code must match the format XXX-XX-XXX." });
             return;
         }
 
         let client;
         try {
             const service = entry.service;
-            if (!service.host) {
-                throw new Error("Nom d'hote FP2 absent de la decouverte.");
+            if (!service.name) {
+                throw new Error("FP2 service name missing from discovery.");
             }
-            client = clientFactory(service.id, service.address, service.port);
+            const { HttpClient } = require("hap-controller");
+            client = new HttpClient(service.id, service.address, service.port);
             const pairingData = await client.startPairing(entry.pairMethod);
             await client.finishPairing(pairingData, pin);
             const pairing = client.getLongTermData();
@@ -207,14 +209,11 @@ function registerAdminRoutes(RED, dependencies = {}) {
             res.json({
                 pairing: {
                     ...pairing,
-                    accessoryId: service.id,
-                    host: service.host,
-                    port: service.port,
                     name: service.name,
                 },
             });
         } catch (_error) {
-            res.status(400).json({ error: "Appairage impossible. Verifiez le code et l'etat du FP2." });
+            res.status(400).json({ error: "Pairing failed. Check the code and the FP2 state." });
         } finally {
             discovered.delete(token);
             await client?.close().catch(() => {});
@@ -222,46 +221,15 @@ function registerAdminRoutes(RED, dependencies = {}) {
     });
 }
 
-function register(RED, TestClient, testDependencies) {
-    registerAdminRoutes(RED, testDependencies);
-    const lookup = testDependencies?.lookup || require("node:dns").promises.lookup;
-    function loadDnssd() {
-        try {
-            return require(require.resolve("dnssd", { paths: [require.resolve("hap-controller")] }));
-        } catch (_error) {
-            return require("dnssd");
-        }
-    }
+function register(RED) {
+    registerAdminRoutes(RED);
+    const dnssd = require(require.resolve("dnssd", { paths: [require.resolve("hap-controller")] }));
 
-    // Resolution mDNS directe du FP2 deja appaire (adresse et port courants),
-    // sans parcourir le reseau : requetes SRV/TXT/A sur le nom memorise.
-    async function resolveByName(pairing) {
-        let dnssd;
-        try {
-            dnssd = testDependencies?.dnssd || loadDnssd();
-        } catch (_error) {
-            return undefined;
-        }
-        const net = require("node:net");
-        if (pairing.name) {
-            try {
-                const service = await dnssd.resolveService(`${pairing.name}._hap._tcp.local`, { timeout: 3000 });
-                const address = (service.addresses || []).find(item => net.isIPv4(item));
-                if (address) return { address, port: service.port };
-            } catch (_error) {
-                // essai suivant
-            }
-        }
-        const hostname = String(pairing.host || "").replace(/\.$/, "");
-        if (hostname) {
-            try {
-                const { answer } = await dnssd.resolve(hostname, "A", { timeout: 3000 });
-                if (answer?.address) return { address: answer.address };
-            } catch (_error) {
-                // repli sur la resolution systeme
-            }
-        }
-        return undefined;
+    async function resolveFP2(name) {
+        const service = await dnssd.resolveService(`${name}._hap._tcp.local`, { timeout: RESOLVE_TIMEOUT_MS });
+        const address = (service.addresses || []).find(item => require("node:net").isIPv4(item));
+        if (!address) throw new Error(`FP2 ${name}: no IPv4 address.`);
+        return { address, port: service.port };
     }
 
     function FP2Node(config) {
@@ -314,7 +282,7 @@ function register(RED, TestClient, testDependencies) {
                 return;
             }
             attempt += 1;
-            node.status({ fill: "red", shape: "ring", text: "deconnecte" });
+            node.status({ fill: "red", shape: "ring", text: "disconnected" });
             node.warn(error);
             if (client === current) {
                 client = undefined;
@@ -333,37 +301,32 @@ function register(RED, TestClient, testDependencies) {
         async function connect() {
             const token = ++attempt;
             let current;
-            node.status({ fill: "yellow", shape: "ring", text: "connexion" });
+            node.status({ fill: "yellow", shape: "ring", text: "connecting" });
             const storedPairing = node.credentials?.pairing;
             if (!storedPairing) {
-                node.status({ fill: "red", shape: "ring", text: "appairage requis" });
+                node.status({ fill: "red", shape: "ring", text: "pairing required" });
                 return;
             }
             let pairing;
             try {
                 pairing = JSON.parse(storedPairing);
-                if (!pairing || typeof pairing !== "object" || Array.isArray(pairing)) {
-                    throw new Error("Donnees d'appairage invalides.");
-                }
-            } catch (_error) {
-                node.status({ fill: "red", shape: "ring", text: "credential invalide" });
-                node.warn("Les donnees d'appairage FP2 memorisees sont invalides.");
+            } catch {
+                pairing = null;
+            }
+            if (!PAIRING_FIELDS.every(field =>
+                typeof pairing?.[field] === "string" && pairing[field].trim())) {
+                node.status({ fill: "red", shape: "ring", text: "invalid pairing" });
+                node.warn("Stored FP2 pairing data is invalid.");
                 return;
             }
             try {
-                const accessoryId = pairing.accessoryId || pairing.AccessoryPairingID;
-                const manualHost = (config.host || "").trim();
-                const found = manualHost ? undefined : await resolveByName(pairing);
+                const { address, port } = await resolveFP2(pairing.name);
                 if (stopped || token !== attempt) return;
-                const host = manualHost || found?.address || pairing.host || pairing.address;
-                const address = require("node:net").isIP(host)
-                    ? host
-                    : (await lookup(host, { family: 4 })).address;
-                if (stopped || token !== attempt) return;
-                const HttpClient = TestClient || require("hap-controller").HttpClient;
-                current = new HttpClient(accessoryId,
+                node.log(`Connecting to FP2 ${address}:${port}`);
+                const { HttpClient } = require("hap-controller");
+                current = new HttpClient(pairing.AccessoryPairingID,
                     address,
-                    Number(config.port || found?.port || pairing.port), pairing, {
+                    port, pairing, {
                         usePersistentConnections: true,
                         subscriptionsUseSameConnection: true,
                     });
@@ -374,7 +337,7 @@ function register(RED, TestClient, testDependencies) {
                 entities = mapping.entities;
                 for (const warning of mapping.warnings) node.warn(warning);
                 if (!entities.size) {
-                    throw new Error("Aucune entite HAP avec notifications trouvee.");
+                    throw new Error("No event-capable HAP entity found.");
                 }
                 const keys = [...entities.keys()];
                 const values = await current.getCharacteristics(keys);
@@ -384,17 +347,17 @@ function register(RED, TestClient, testDependencies) {
                     if (!stopped && token === attempt) consume(event);
                 });
                 current.on("event-disconnect", () => {
-                    void retry(current, token, "Connexion aux evenements FP2 interrompue.");
+                    void retry(current, token, "FP2 event connection lost.");
                 });
                 const result = await current.subscribeCharacteristics(keys);
                 if (stopped || token !== attempt) return;
                 if (result?.characteristics?.some(characteristic => Number(characteristic.status || 0) !== 0)) {
-                    throw new Error("Le FP2 a refuse un abonnement aux evenements.");
+                    throw new Error("The FP2 rejected an event subscription.");
                 }
                 delay = 1000;
-                node.status({ fill: "green", shape: "dot", text: `${entities.size} etats` });
+                node.status({ fill: "green", shape: "dot", text: `${entities.size} states` });
             } catch (error) {
-                const message = error.code ? `Erreur FP2 : ${error.code}` : error.message;
+                const message = error.code ? `FP2 error: ${error.code}` : error.message;
                 await retry(current, token, message);
             }
         }
@@ -419,5 +382,3 @@ function register(RED, TestClient, testDependencies) {
 }
 
 module.exports = register;
-module.exports.buildEntities = buildEntities;
-module.exports.registerAdminRoutes = registerAdminRoutes;
