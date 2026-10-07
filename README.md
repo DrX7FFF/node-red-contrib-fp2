@@ -17,11 +17,9 @@ Restart Node-RED, add the **FP2** input node, open its settings, and choose **Re
 
 The pairing code is sent only to the local Node-RED admin endpoint during setup and is not logged or stored. Long-term HomeKit credentials are stored in the node's password credential field, not in the exported flow. Protect the Node-RED editor with authentication and HTTPS when accessed over an untrusted network. Back up the Node-RED credential store together with the configured `credentialSecret`; without that secret, encrypted credentials cannot be recovered.
 
-## Existing pairings
+## Pairing availability
 
-HomeKit Pair Setup is available only when discovery reports the accessory as available for pairing. For an FP2 already paired by the Python gateway, stop the gateway and paste the JSON object for its alias from the existing aiohomekit pairing file into the masked **Pairing existant** credential field. Paste the alias object itself, not the outer object containing all aliases. The node converts the aiohomekit IP pairing format in memory and stores the pasted value as a Node-RED credential; it does not read or modify the pairing file. Keep a protected backup until the Node-RED connection has been verified. Do not run the gateway and Node-RED at the same time with that pairing.
-
-For a new controller pairing, leave **Pairing existant** empty and use discovery plus the HomeKit setup code. If the accessory is already paired and the existing aiohomekit pairing is unavailable, Pair Setup cannot be repeated; remove/revoke the old pairing or otherwise make the accessory available through its existing controller/Aqara setup first.
+HomeKit Pair Setup is available only when discovery reports the accessory as available for pairing. If the FP2 is already paired, remove/revoke the old pairing or otherwise make the accessory available through its existing controller/Aqara setup first. Pair through discovery and the HomeKit setup code; importing external pairing data is not supported.
 
 ## Configuration and messages
 
@@ -52,5 +50,5 @@ npm test
 
 The implementation uses the IP transport from `hap-controller`. That dependency includes optional BLE-related packages; installation scripts are disabled for the offline development test command because Bluetooth is not used by this node.
 
-Real-device pairing, notification delivery, zone changes, illuminance, and reconnect behavior still need validation with an FP2. Do not operate the Node-RED node and Python gateway with the same HomeKit controller pairing at the same time.
+Real-device pairing, notification delivery, zone changes, illuminance, and reconnect behavior still need validation with an FP2.
 Connect your Node Red to your FP2

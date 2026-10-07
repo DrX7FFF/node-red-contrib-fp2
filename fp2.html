@@ -118,15 +118,11 @@
         <button type="button" class="red-ui-button" id="node-fp2-pair">Appairer et memoriser</button>
         <span id="node-fp2-pairing-result" role="status"></span>
     </div>
-    <div class="form-row">
-        <label for="node-input-pairing">Pairing existant</label>
-        <input type="password" id="node-input-pairing" autocomplete="new-password" placeholder="Coller l'objet aiohomekit JSON (optionnel)">
-    </div>
-    <div class="form-tips">Pour un accessoire deja appaire, collez ici l'objet de son alias aiohomekit. Cette valeur reste un credential Node-RED.</div>
+    <input type="hidden" id="node-input-pairing">
 </script>
 
 <script type="text/html" data-help-name="fp2">
     <p>Entree HomeKit directe pour les changements de presence du FP2, sans MQTT.</p>
     <p>Utilisez Rechercher le FP2, selectionnez l'accessoire, puis saisissez le code HomeKit. Les donnees d'appairage sont memorisees comme credential Node-RED.</p>
-    <p>La sortie fournit un message par changement; l'etat initial est lu sans emission. <code>msg.raw</code> contient l'evenement complet emis par le client HAP. N'utilisez pas simultanement le meme appairage dans la gateway Python.</p>
+    <p>La sortie fournit un message par changement; l'etat initial est lu sans emission. <code>msg.raw</code> contient l'evenement complet emis par le client HAP.</p>
 </script>

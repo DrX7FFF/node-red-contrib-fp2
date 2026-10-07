@@ -120,34 +120,14 @@ test("editor declares pairing as a Node-RED credential and provides pairing cont
     assert.equal(definition.inputs, 0);
     assert.equal(definition.outputs, 1);
     const pairingInputId = `node-input-${Object.keys(definition.credentials)[0]}`;
-    assert.ok(html.includes(`id="${pairingInputId}"`));
-    assert.ok(html.includes(`for="${pairingInputId}"`));
+    assert.ok(html.includes(`<input type="hidden" id="${pairingInputId}">`));
+    assert.ok(!html.includes(`for="${pairingInputId}"`));
+    assert.ok(!html.includes("Pairing existant"));
+    assert.ok(!html.includes("aiohomekit"));
     assert.ok(script[1].includes(`$("#${pairingInputId}")`));
     assert.ok(!html.includes("node-input-credentials-pairing"));
     assert.ok(html.includes("fp2/pairing/discover"));
     assert.ok(html.includes("fp2/pairing/pair"));
-});
-
-test("converts an aiohomekit IP pairing for the HAP client without changing its source", () => {
-    const source = {
-        Connection: "IP",
-        AccessoryPairingID: "AA:BB:CC:DD:EE:FF",
-        AccessoryLTPK: "a".repeat(64),
-        iOSPairingId: "controller",
-        iOSDeviceLTPK: "b".repeat(64),
-        iOSDeviceLTSK: "c".repeat(64),
-        AccessoryIP: "192.0.2.30",
-        AccessoryPort: 12345,
-    };
-    const original = JSON.stringify(source);
-    const converted = register.normalizePairing(source);
-    assert.equal(Buffer.from(converted.AccessoryPairingID, "hex").toString(), source.AccessoryPairingID);
-    assert.equal(Buffer.from(converted.iOSDevicePairingID, "hex").toString(), source.iOSPairingId);
-    assert.equal(converted.iOSDeviceLTSK, source.iOSDeviceLTSK + source.iOSDeviceLTPK);
-    assert.equal(converted.accessoryId, source.AccessoryPairingID);
-    assert.equal(converted.address, source.AccessoryIP);
-    assert.equal(converted.port, source.AccessoryPort);
-    assert.equal(JSON.stringify(source), original);
 });
 
 test("maps zones, global presence, and illuminance from event-capable characteristics", () => {
@@ -237,6 +217,7 @@ test("connects with stored credentials and emits only entity changes", { timeout
         assert.equal(client.args[0], pairing.AccessoryPairingID);
         assert.equal(client.args[1], pairing.address);
         assert.equal(client.args[2], pairing.port);
+        assert.deepEqual(client.args[3], pairing);
         assert.deepEqual(client.keys, [...mapping.entities.keys()]);
 
         const rawEvent = {

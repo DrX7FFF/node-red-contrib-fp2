@@ -1,7 +1,5 @@
 ## Correction module Bug
 
-## Supprimer l'option de récupération d'un JSON
-
 ## Supprimer la sauvegarde de l'IP (afficher l'information seulement)
 Par contre à chaque connection, refaire une découverte pas mDNS.
 Sauvegarder le nom pour le sélectionner après la découverte

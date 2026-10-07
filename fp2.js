@@ -34,37 +34,6 @@ function serviceName(service) {
     return typeof service.name === "string" ? service.name.trim() : "";
 }
 
-function normalizePairing(pairing) {
-    if (!pairing || typeof pairing !== "object") {
-        throw new Error("Donnees d'appairage invalides.");
-    }
-    if (pairing.Connection !== "IP") return pairing;
-
-    for (const field of ["AccessoryPairingID", "iOSPairingId"]) {
-        if (typeof pairing[field] !== "string" || !pairing[field]) {
-            throw new Error(`Champ d'appairage absent : ${field}`);
-        }
-    }
-    for (const field of ["AccessoryLTPK", "iOSDeviceLTPK", "iOSDeviceLTSK"]) {
-        const length = field === "iOSDeviceLTSK" ? /^(?:[0-9a-f]{64}|[0-9a-f]{128})$/i : /^[0-9a-f]{64}$/i;
-        if (typeof pairing[field] !== "string" || !length.test(pairing[field])) {
-            throw new Error(`Cle d'appairage invalide : ${field}`);
-        }
-    }
-    return {
-        AccessoryPairingID: Buffer.from(pairing.AccessoryPairingID, "utf8").toString("hex"),
-        AccessoryLTPK: pairing.AccessoryLTPK,
-        iOSDevicePairingID: Buffer.from(pairing.iOSPairingId, "utf8").toString("hex"),
-        iOSDeviceLTPK: pairing.iOSDeviceLTPK,
-        iOSDeviceLTSK: pairing.iOSDeviceLTSK.length === 64
-            ? pairing.iOSDeviceLTSK + pairing.iOSDeviceLTPK
-            : pairing.iOSDeviceLTSK,
-        accessoryId: pairing.AccessoryPairingID,
-        address: pairing.AccessoryIP,
-        port: pairing.AccessoryPort,
-    };
-}
-
 function buildEntities(database, prefix = "fp2") {
     const entities = new Map();
     const occupancy = [];
@@ -324,7 +293,10 @@ function register(RED, TestClient, testDependencies) {
             }
             let pairing;
             try {
-                pairing = normalizePairing(JSON.parse(storedPairing));
+                pairing = JSON.parse(storedPairing);
+                if (!pairing || typeof pairing !== "object" || Array.isArray(pairing)) {
+                    throw new Error("Donnees d'appairage invalides.");
+                }
             } catch (_error) {
                 node.status({ fill: "red", shape: "ring", text: "credential invalide" });
                 node.warn("Les donnees d'appairage FP2 memorisees sont invalides.");
@@ -387,5 +359,4 @@ function register(RED, TestClient, testDependencies) {
 
 module.exports = register;
 module.exports.buildEntities = buildEntities;
-module.exports.normalizePairing = normalizePairing;
 module.exports.registerAdminRoutes = registerAdminRoutes;
