@@ -6,7 +6,6 @@
   "files": ["fp2.js", "fp2.html", "README.md"],
   "keywords": ["node-red", "aqara", "fp2", "homekit"],
   "engines": { "node": ">=18" },
-  "scripts": { "test": "node --test" },
   "dependencies": { "hap-controller": "0.10.2" },
   "node-red": { "nodes": { "fp2": "fp2.js" } }
 }

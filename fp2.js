@@ -49,7 +49,6 @@ function buildEntities(database, prefix = "fp2") {
     const illuminance = [];
     const warnings = [];
     const unresolved = [];
-    const usedSlugs = new Set();
     for (const accessory of database.accessories || []) {
         for (const service of accessory.services || []) {
             const characteristics = service.characteristics || [];
@@ -98,19 +97,8 @@ function buildEntities(database, prefix = "fp2") {
     }
     for (const candidate of occupancy) {
         if (globalSensor && candidate === globalSensor) continue;
-        if (!candidate.name || isGlobalName(candidate.name)) {
-            unresolved.push({ aid: candidate.aid, iid: candidate.iid, kind: "zone", name: candidate.name || null });
-            continue;
-        }
-        const baseSlug = slug(candidate.name);
-        if (!baseSlug) {
-            unresolved.push({ aid: candidate.aid, iid: candidate.iid, kind: "zone", name: candidate.name });
-            continue;
-        }
-        let zone = baseSlug;
-        if (usedSlugs.has(zone)) zone = `${zone}-${candidate.aid}-${candidate.iid}`;
-        usedSlugs.add(zone);
-        addEntity(candidate, "zone", `${prefix}/zone/${zone}`, { zone });
+        const zoneId = `${candidate.aid}-${candidate.iid}`;
+        addEntity(candidate, "zone", `${prefix}/zone/${zoneId}`, { zone: candidate.name || zoneId });
     }
 
     if (illuminance.length === 1) {
@@ -139,6 +127,7 @@ function registerAdminRoutes(RED) {
     RED.httpAdmin.get("/fp2/pairing/discover", permission, (_req, res) => {
         const { IPDiscovery } = require("hap-controller");
         const discovery = new IPDiscovery();
+        discovered.clear();
         discovery.start();
         setTimeout(async () => {
             try {
@@ -150,15 +139,12 @@ function registerAdminRoutes(RED) {
                 }));
                 discovery.stop();
                 const devices = await Promise.all(services.map(async service => {
-                    const token = require("node:crypto").randomBytes(24).toString("hex");
                     const pairMethod = await discovery.getPairMethod(service);
-                    discovered.set(token, {
+                    discovered.set(service.id, {
                         service,
                         pairMethod,
-                        expiresAt: Date.now() + 120000,
                     });
                     return {
-                        token,
                         name: String(service.name || service.id),
                         id: service.id,
                         model: service.md || "",
@@ -176,10 +162,9 @@ function registerAdminRoutes(RED) {
     });
 
     RED.httpAdmin.post("/fp2/pairing/pair", permission, async (req, res) => {
-        const { token, pin } = req.body || {};
-        const entry = discovered.get(token);
-        if (!entry || entry.expiresAt < Date.now()) {
-            discovered.delete(token);
+        const { id, pin } = req.body || {};
+        const entry = discovered.get(id);
+        if (!entry) {
             res.status(400).json({ error: "Run discovery again before pairing." });
             return;
         }
@@ -215,7 +200,6 @@ function registerAdminRoutes(RED) {
         } catch (_error) {
             res.status(400).json({ error: "Pairing failed. Check the code and the FP2 state." });
         } finally {
-            discovered.delete(token);
             await client?.close().catch(() => {});
         }
     });
@@ -272,7 +256,7 @@ function register(RED) {
                     iid: entity.iid,
                     timestamp: new Date().toISOString(),
                 };
-                if (entity.kind === "zone") message.zone = entity.name;
+                if (entity.kind === "zone") message.zone = entity.name || entity.zone;
                 node.send(message);
             }
         }

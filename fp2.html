@@ -29,7 +29,7 @@
                     .done(function(response) {
                         for (const device of response.devices || []) {
                             const label = `${device.name} (${device.model || "FP2"}) - ${device.address}`;
-                            const option = $("<option>").val(device.token).text(label);
+                            const option = $("<option>").val(device.id).text(label);
                             if (!device.availableToPair) option.prop("disabled", true);
                             $select.append(option);
                         }
@@ -46,8 +46,8 @@
             $("#node-fp2-pair").on("click", function() {
                 const button = $(this);
                 const pin = $("#node-fp2-pin").val();
-                const token = $select.val();
-                if (!token) {
+                const id = $select.val();
+                if (!id) {
                     $result.text("Search for and select an available FP2.");
                     return;
                 }
@@ -57,7 +57,7 @@
                     url: "fp2/pairing/pair",
                     method: "POST",
                     contentType: "application/json",
-                    data: JSON.stringify({ token, pin }),
+                    data: JSON.stringify({ id, pin }),
                 })
                     .done(function(response) {
                         $("#node-input-pairing")
