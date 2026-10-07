@@ -1,0 +1,8 @@
+changement du compose + modification pour le port 80
+
+echo "net.ipv4.ip_unprivileged_port_start=80" | sudo tee /etc/sysctl.d/99-ports.conf
+sudo sysctl --system
+
+
+## Vérifier dans la doc qu'on touche bien au settings.js sur les autres réglages
+ Ensuite, `uiPort: 80` dans `settings.js`, ou `PORT=80` en variable d'environnement si ton `settings.js` lit `process.env.PORT`.

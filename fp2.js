@@ -369,7 +369,11 @@ function register(RED, TestClient, testDependencies) {
         void connect();
     }
 
-    RED.nodes.registerType("fp2", FP2Node);
+    RED.nodes.registerType("fp2", FP2Node, {
+            credentials: {
+                pairing: { type: "password" }
+            }
+        });
 }
 
 module.exports = register;
