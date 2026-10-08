@@ -1,10 +1,7 @@
 ajouter une coche si on veut renvoyer ou pas l'état à la connexion
 
-
 répartir les .gitignore par sous dossier/service
 
-
-notter différence entre bouton reset pendant 10s (conserve le paramétrage) et 10x (reset usine)
 
 Documenter :
 - le changement du fichier compose.yaml
