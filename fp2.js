@@ -18,11 +18,6 @@ function shortType(value) {
     return String(value || "").toUpperCase().split("-")[0].replace(/^0+/, "");
 }
 
-function findValue(service, type) {
-    return (service.characteristics || [])
-        .find(characteristic => shortType(characteristic.type) === type)?.value;
-}
-
 function buildConfig(database, prefix) {
     const accessories = database.accessories || [];
     if (accessories.length !== 1) {
@@ -31,14 +26,26 @@ function buildConfig(database, prefix) {
     const accessory = accessories[0];
     const entities = {};
     for (const service of accessory.services || []) {
-        const name = findValue(service, NAME_TYPE) ?? null;
-        const index = findValue(service, INDEX_TYPE) ?? null;
+        const entity = { iid: null, type: null, name: null, index: null };
         for (const characteristic of service.characteristics || []) {
-            const type = WATCHED_TYPES[shortType(characteristic.type)];
-            if (!type || !characteristic.perms?.includes("ev")) continue;
-            const iid = String(characteristic.iid);
-            entities[iid] = { iid, type, name, index, topic: `${prefix}/${iid}` };
+            const code = shortType(characteristic.type);
+            switch (code) {
+                case NAME_TYPE:
+                    entity.name = characteristic.value;
+                    break;
+                case INDEX_TYPE:
+                    entity.index = characteristic.value;
+                    break;
+                default:
+                    if (WATCHED_TYPES[code] && characteristic.perms?.includes("ev")) {
+                        entity.iid = String(characteristic.iid);
+                        entity.type = WATCHED_TYPES[code];
+                    }
+            }
         }
+        if (!entity.type) continue;
+        entity.topic = `${prefix}/${entity.iid}`;
+        entities[entity.iid] = entity;
     }
     return { aid: String(accessory.aid), entities };
 }
