@@ -18,7 +18,7 @@ function shortType(value) {
     return String(value || "").toUpperCase().split("-")[0].replace(/^0+/, "");
 }
 
-function buildConfig(database, prefix) {
+function buildConfig(database) {
     const accessories = database.accessories || [];
     if (accessories.length !== 1) {
         throw new Error(`Expected a single HAP accessory, found ${accessories.length}.`);
@@ -44,7 +44,6 @@ function buildConfig(database, prefix) {
             }
         }
         if (!entity.type) continue;
-        entity.topic = `${prefix}/${entity.iid}`;
         entities[entity.iid] = entity;
     }
     return { aid: String(accessory.aid), entities };
@@ -158,7 +157,7 @@ function register(RED) {
         let reconnectTimer;
         let delay = 1000;
         let attempt = 0;
-        const prefix = (nodeConfig.topicPrefix || "fp2").replace(/^\/+|\/+$/g, "") || "fp2";
+        const topic = nodeConfig.topic;
 
         function consume(data, initial = false) {
             for (const characteristic of data.characteristics || []) {
@@ -176,7 +175,7 @@ function register(RED) {
                     continue;
                 }
                 node.send({
-                    topic: entity.topic,
+                    topic,
                     type: entity.type,
                     payload: value,
                     raw: data,
@@ -245,9 +244,9 @@ function register(RED) {
                 client = current;
                 const database = await current.getAccessories();
                 if (isStale()) return;
-                node.send({ payload: database.accessories, type: "base" });
-                config = buildConfig(database, prefix);
-                node.send({ payload: config, type: "config" });
+                node.send({ topic, payload: database.accessories, type: "base" });
+                config = buildConfig(database);
+                node.send({ topic, payload: config, type: "config" });
                 const keys = Object.keys(config.entities).map(iid => `${config.aid}.${iid}`);
                 if (!keys.length) {
                     throw new Error("No event-capable HAP entity found.");
