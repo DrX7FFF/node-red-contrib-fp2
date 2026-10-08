@@ -154,6 +154,7 @@ function register(RED) {
         let config;
         let client;
         let stopped = false;
+        let canNotify = true;
         let reconnectTimer;
         let delay = 1000;
         let attempt = 0;
@@ -193,7 +194,12 @@ function register(RED) {
             }
             attempt += 1;
             node.status({ fill: "red", shape: "ring", text: "disconnected" });
-            node.warn(error);
+            if (canNotify) {
+                canNotify = false;
+                node.error(error, { topic });
+            } else {
+                node.warn(error);
+            }
             if (client === current) {
                 client = undefined;
             }
@@ -266,6 +272,7 @@ function register(RED) {
                     throw new Error("The FP2 rejected an event subscription.");
                 }
                 delay = 1000;
+                canNotify = true;
                 node.status({ fill: "green", shape: "dot", text: `${keys.length} states` });
             } catch (error) {
                 const message = error.code ? `FP2 error: ${error.code}` : error.message;

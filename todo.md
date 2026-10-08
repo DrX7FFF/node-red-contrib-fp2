@@ -1,12 +1,3 @@
-Vérifier la lecture de la base
-Regarder s'il y a une versoin de la base
-conditionner certain message
-Récupérer les erreurs
-
-petit bug à la connection :
-nodered  | 7 Oct 20:51:42 - [info] [fp2:365609b9c531873c] Connecting to FP2 192.168.1.141:60846
-nodered  | 7 Oct 20:51:43 - [warn] [fp2:365609b9c531873c] Ambiguous global presence sensor; no global topic assigned.
-
 ajouter une coche si on veut renvoyer ou pas l'état à la connexion
 
 
