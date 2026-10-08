@@ -10,35 +10,34 @@ const PAIRING_FIELDS = [
     "iOSDeviceLTSK",
     "iOSDeviceLTPK",
 ];
-const WATCHED_TYPES = new Set(["71", "6B"]);
+const WATCHED_TYPES = { "71": "presence", "6B": "illuminance" };
+const NAME_TYPE = "23";
+const INDEX_TYPE = "C8622A33";
 
 function shortType(value) {
     return String(value || "").toUpperCase().split("-")[0].replace(/^0+/, "");
 }
 
-function serviceName(service) {
-    const characteristics = service.characteristics || [];
-    const named = ["E3", "23"].map(type => characteristics.find(characteristic =>
-        shortType(characteristic.type) === type && typeof characteristic.value === "string"
-        && characteristic.value.trim())).find(Boolean);
-    if (named) return named.value.trim();
-    return typeof service.name === "string" ? service.name.trim() : "";
+function findValue(service, type) {
+    return (service.characteristics || [])
+        .find(characteristic => shortType(characteristic.type) === type)?.value;
 }
 
-function buildEntities(database, prefix) {
+function buildConfig(database, prefix) {
     const accessories = database.accessories || [];
     if (accessories.length !== 1) {
         throw new Error(`Expected a single HAP accessory, found ${accessories.length}.`);
     }
     const accessory = accessories[0];
-    const entities = new Map();
+    const entities = {};
     for (const service of accessory.services || []) {
-        const name = serviceName(service);
+        const name = findValue(service, NAME_TYPE) ?? null;
+        const index = findValue(service, INDEX_TYPE) ?? null;
         for (const characteristic of service.characteristics || []) {
-            if (!WATCHED_TYPES.has(shortType(characteristic.type))
-                || !characteristic.perms?.includes("ev")) continue;
+            const type = WATCHED_TYPES[shortType(characteristic.type)];
+            if (!type || !characteristic.perms?.includes("ev")) continue;
             const iid = String(characteristic.iid);
-            entities.set(iid, { iid, name, topic: `${prefix}/${iid}` });
+            entities[iid] = { iid, type, name, index, topic: `${prefix}/${iid}` };
         }
     }
     return { aid: String(accessory.aid), entities };
@@ -142,24 +141,23 @@ function register(RED) {
         return { address, port: service.port };
     }
 
-    function FP2Node(config) {
-        RED.nodes.createNode(this, config);
+    function FP2Node(nodeConfig) {
+        RED.nodes.createNode(this, nodeConfig);
         const node = this;
         const lastValues = new Map();
-        let aid;
-        let entities = new Map();
+        let config;
         let client;
         let stopped = false;
         let reconnectTimer;
         let delay = 1000;
         let attempt = 0;
-        const prefix = (config.topicPrefix || "fp2").replace(/^\/+|\/+$/g, "") || "fp2";
+        const prefix = (nodeConfig.topicPrefix || "fp2").replace(/^\/+|\/+$/g, "") || "fp2";
 
         function consume(data, initial = false) {
             for (const characteristic of data.characteristics || []) {
-                if (String(characteristic.aid) !== aid) continue;
+                if (String(characteristic.aid) !== config.aid) continue;
                 const key = String(characteristic.iid);
-                const entity = entities.get(key);
+                const entity = config.entities[key];
                 if (!entity || (characteristic.status !== undefined && Number(characteristic.status) !== 0)) {
                     continue;
                 }
@@ -172,9 +170,11 @@ function register(RED) {
                 }
                 node.send({
                     topic: entity.topic,
+                    type: entity.type,
                     payload: value,
                     raw: data,
                     entity: entity.name,
+                    index: entity.index,
                     iid: entity.iid,
                     timestamp: new Date().toISOString(),
                 });
@@ -238,14 +238,13 @@ function register(RED) {
                 client = current;
                 const database = await current.getAccessories();
                 if (isStale()) return;
-                node.send({ payload: database.accessories, kind: "base" });
-                const mapping = buildEntities(database, prefix);
-                aid = mapping.aid;
-                entities = mapping.entities;
-                if (!entities.size) {
+                node.send({ payload: database.accessories, type: "base" });
+                config = buildConfig(database, prefix);
+                node.send({ payload: config, type: "config" });
+                const keys = Object.keys(config.entities).map(iid => `${config.aid}.${iid}`);
+                if (!keys.length) {
                     throw new Error("No event-capable HAP entity found.");
                 }
-                const keys = [...entities.keys()].map(iid => `${aid}.${iid}`);
                 const values = await current.getCharacteristics(keys);
                 if (isStale()) return;
                 consume(values, true);
@@ -261,7 +260,7 @@ function register(RED) {
                     throw new Error("The FP2 rejected an event subscription.");
                 }
                 delay = 1000;
-                node.status({ fill: "green", shape: "dot", text: `${entities.size} states` });
+                node.status({ fill: "green", shape: "dot", text: `${keys.length} states` });
             } catch (error) {
                 const message = error.code ? `FP2 error: ${error.code}` : error.message;
                 await retry(current, token, message);
