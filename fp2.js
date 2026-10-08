@@ -284,6 +284,7 @@ function register(RED) {
 
         async function connect() {
             const token = ++attempt;
+            const isStale = () => stopped || token !== attempt;
             let current;
             node.status({ fill: "yellow", shape: "ring", text: "connecting" });
             const storedPairing = node.credentials?.pairing;
@@ -305,7 +306,7 @@ function register(RED) {
             }
             try {
                 const { address, port } = await resolveFP2(pairing.name);
-                if (stopped || token !== attempt) return;
+                if (isStale()) return;
                 node.log(`Connecting to FP2 ${address}:${port}`);
                 const { HttpClient } = require("hap-controller");
                 current = new HttpClient(pairing.AccessoryPairingID,
@@ -316,7 +317,7 @@ function register(RED) {
                     });
                 client = current;
                 const database = await current.getAccessories();
-                if (stopped || token !== attempt) return;
+                if (isStale()) return;
                 node.send({ payload: database.accessories, kind: "base" });
                 const mapping = buildEntities(database, prefix);
                 entities = mapping.entities;
@@ -326,16 +327,16 @@ function register(RED) {
                 }
                 const keys = [...entities.keys()];
                 const values = await current.getCharacteristics(keys);
-                if (stopped || token !== attempt) return;
+                if (isStale()) return;
                 consume(values, true);
                 current.on("event", event => {
-                    if (!stopped && token === attempt) consume(event);
+                    if (!isStale()) consume(event);
                 });
                 current.on("event-disconnect", () => {
                     void retry(current, token, "FP2 event connection lost.");
                 });
                 const result = await current.subscribeCharacteristics(keys);
-                if (stopped || token !== attempt) return;
+                if (isStale()) return;
                 if (result?.characteristics?.some(characteristic => Number(characteristic.status || 0) !== 0)) {
                     throw new Error("The FP2 rejected an event subscription.");
                 }
