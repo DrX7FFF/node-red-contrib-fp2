@@ -10,28 +10,10 @@ const PAIRING_FIELDS = [
     "iOSDeviceLTSK",
     "iOSDeviceLTPK",
 ];
-const GLOBAL_NAMES = new Set([
-    "global occupancy",
-    "global presence",
-    "occupancy",
-    "occupancy sensor",
-    "presence",
-    "presence globale",
-    "presence global",
-    "presence sensor",
-]);
+const WATCHED_TYPES = new Set(["71", "6B"]);
 
 function shortType(value) {
     return String(value || "").toUpperCase().split("-")[0].replace(/^0+/, "");
-}
-
-function slug(name) {
-    return name.normalize("NFKD").replace(/[\u0300-\u036f]/g, "")
-        .toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
-}
-
-function isGlobalName(name) {
-    return GLOBAL_NAMES.has(slug(name).replace(/-/g, " "));
 }
 
 function serviceName(service) {
@@ -43,79 +25,23 @@ function serviceName(service) {
     return typeof service.name === "string" ? service.name.trim() : "";
 }
 
-function buildEntities(database, prefix = "fp2") {
+function buildEntities(database, prefix) {
+    const accessories = database.accessories || [];
+    if (accessories.length !== 1) {
+        throw new Error(`Expected a single HAP accessory, found ${accessories.length}.`);
+    }
+    const accessory = accessories[0];
     const entities = new Map();
-    const occupancy = [];
-    const illuminance = [];
-    const warnings = [];
-    const unresolved = [];
-    for (const accessory of database.accessories || []) {
-        for (const service of accessory.services || []) {
-            const characteristics = service.characteristics || [];
-            const name = serviceName(service);
-            for (const characteristic of characteristics) {
-                const type = shortType(characteristic.type);
-                if (type !== "71" && type !== "6B") continue;
-                const candidate = {
-                    aid: String(accessory.aid),
-                    iid: String(characteristic.iid),
-                    name,
-                    eventCapable: characteristic.perms?.includes("ev"),
-                };
-                if (type === "71") {
-                    occupancy.push(candidate);
-                } else {
-                    illuminance.push(candidate);
-                }
-            }
+    for (const service of accessory.services || []) {
+        const name = serviceName(service);
+        for (const characteristic of service.characteristics || []) {
+            if (!WATCHED_TYPES.has(shortType(characteristic.type))
+                || !characteristic.perms?.includes("ev")) continue;
+            const iid = String(characteristic.iid);
+            entities.set(iid, { iid, name, topic: `${prefix}/${iid}` });
         }
     }
-
-    const namedGlobal = occupancy.filter(candidate => isGlobalName(candidate.name));
-    let globalSensor;
-    if (occupancy.length === 1) {
-        globalSensor = occupancy[0];
-    } else if (namedGlobal.length === 1) {
-        globalSensor = namedGlobal[0];
-    } else if (namedGlobal.length > 1) {
-        warnings.push("Several sensors have a global presence name.");
-    } else if (occupancy.length > 0) {
-        warnings.push("Ambiguous global presence sensor; no global topic assigned.");
-    }
-
-    function addEntity(candidate, kind, topic, extra = {}) {
-        const key = `${candidate.aid}.${candidate.iid}`;
-        if (!candidate.eventCapable) {
-            unresolved.push({ aid: candidate.aid, iid: candidate.iid, kind, reason: "no-events" });
-            return;
-        }
-        entities.set(key, { ...candidate, kind, topic, ...extra });
-    }
-
-    if (globalSensor) {
-        addEntity(globalSensor, "presence", `${prefix}/presence`);
-    }
-    for (const candidate of occupancy) {
-        if (globalSensor && candidate === globalSensor) continue;
-        const zoneId = `${candidate.aid}-${candidate.iid}`;
-        addEntity(candidate, "zone", `${prefix}/zone/${zoneId}`, { zone: candidate.name || zoneId });
-    }
-
-    if (illuminance.length === 1) {
-        addEntity(illuminance[0], "illuminance", `${prefix}/illuminance`);
-    } else if (illuminance.length > 1) {
-        const namedGlobalLight = illuminance.filter(candidate => isGlobalName(candidate.name));
-        if (namedGlobalLight.length === 1) {
-            addEntity(namedGlobalLight[0], "illuminance", `${prefix}/illuminance`);
-        } else {
-            warnings.push("Several illuminance sensors exposed; main topic is ambiguous.");
-            for (const candidate of illuminance) {
-                unresolved.push({ aid: candidate.aid, iid: candidate.iid, kind: "illuminance", name: candidate.name || null });
-            }
-        }
-    }
-
-    return { entities, warnings, unresolved };
+    return { aid: String(accessory.aid), entities };
 }
 
 function registerAdminRoutes(RED) {
@@ -220,6 +146,7 @@ function register(RED) {
         RED.nodes.createNode(this, config);
         const node = this;
         const lastValues = new Map();
+        let aid;
         let entities = new Map();
         let client;
         let stopped = false;
@@ -230,34 +157,27 @@ function register(RED) {
 
         function consume(data, initial = false) {
             for (const characteristic of data.characteristics || []) {
-                const key = `${characteristic.aid}.${characteristic.iid}`;
+                if (String(characteristic.aid) !== aid) continue;
+                const key = String(characteristic.iid);
                 const entity = entities.get(key);
                 if (!entity || (characteristic.status !== undefined && Number(characteristic.status) !== 0)) {
                     continue;
                 }
-                const value = entity.kind === "illuminance"
-                    ? Number(characteristic.value)
-                    : [0, 1, false, true].includes(characteristic.value)
-                        ? Boolean(characteristic.value)
-                        : undefined;
-                if (value === undefined || (typeof value === "number" && !Number.isFinite(value))) continue;
+                const value = characteristic.value;
+                if (value === undefined) continue;
                 const previous = lastValues.get(key);
                 lastValues.set(key, value);
                 if (initial || previous === value) {
                     continue;
                 }
-                const message = {
+                node.send({
                     topic: entity.topic,
                     payload: value,
                     raw: data,
-                    kind: entity.kind,
                     entity: entity.name,
-                    aid: entity.aid,
                     iid: entity.iid,
                     timestamp: new Date().toISOString(),
-                };
-                if (entity.kind === "zone") message.zone = entity.name || entity.zone;
-                node.send(message);
+                });
             }
         }
 
@@ -320,12 +240,12 @@ function register(RED) {
                 if (isStale()) return;
                 node.send({ payload: database.accessories, kind: "base" });
                 const mapping = buildEntities(database, prefix);
+                aid = mapping.aid;
                 entities = mapping.entities;
-                for (const warning of mapping.warnings) node.warn(warning);
                 if (!entities.size) {
                     throw new Error("No event-capable HAP entity found.");
                 }
-                const keys = [...entities.keys()];
+                const keys = [...entities.keys()].map(iid => `${aid}.${iid}`);
                 const values = await current.getCharacteristics(keys);
                 if (isStale()) return;
                 consume(values, true);
