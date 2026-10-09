@@ -163,23 +163,17 @@ function register(RED) {
         function consume(data, initial = false) {
             for (const characteristic of data.characteristics || []) {
                 if (String(characteristic.aid) !== config.aid) continue;
+                if (characteristic.status !== undefined && Number(characteristic.status) !== 0) continue;
+                if (characteristic.value === undefined) continue;
                 const key = String(characteristic.iid);
                 const entity = config.entities[key];
-                if (!entity || (characteristic.status !== undefined && Number(characteristic.status) !== 0)) {
-                    continue;
-                }
-                const value = characteristic.value;
-                if (value === undefined) continue;
-                const previous = lastValues.get(key);
-                lastValues.set(key, value);
-                if (initial || previous === value) {
-                    continue;
-                }
+                if (!entity) continue;
+                if (lastValues.get(key) === characteristic.value) continue;
+                lastValues.set(key, characteristic.value);
                 node.send({
                     topic,
                     type: entity.type,
-                    payload: value,
-                    raw: data,
+                    payload: characteristic.value,
                     entity: entity.name,
                     index: entity.index,
                     iid: entity.iid,
@@ -250,13 +244,10 @@ function register(RED) {
                 client = current;
                 const database = await current.getAccessories();
                 if (isStale()) return;
-                node.send({ topic, payload: database.accessories, type: "base" });
                 config = buildConfig(database);
-                node.send({ topic, payload: config, type: "config" });
+                node.send({ topic, payload: config, type: "config", raw: database.accessories });
                 const keys = Object.keys(config.entities).map(iid => `${config.aid}.${iid}`);
-                if (!keys.length) {
-                    throw new Error("No event-capable HAP entity found.");
-                }
+                if (!keys.length) throw new Error("No event-capable HAP entity found.");
                 const values = await current.getCharacteristics(keys);
                 if (isStale()) return;
                 consume(values, true);
