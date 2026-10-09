@@ -21,3 +21,6 @@ sinon sudo apt install avahi-daemon libnss-mdns
 
 ## Vérification des ports après le démarrage te montre tout ce qui écoute
 ss -tlnp
+
+
+Test
