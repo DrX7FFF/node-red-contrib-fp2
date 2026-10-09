@@ -1,21 +1,12 @@
-ajouter une coche si on veut renvoyer ou pas l'état à la connexion
-
 répartir les .gitignore par sous dossier/service
 
 
 Documenter :
 - le changement du fichier compose.yaml
-- modification pour le port 80
-
-Bash pour autoriser au niveau du système :
-echo "net.ipv4.ip_unprivileged_port_start=80" | sudo tee /etc/sysctl.d/99-ports.conf
-sudo sysctl --system
-
-## Vérifier dans la doc qu'on touche bien au settings.js sur les autres réglages
- Ensuite, `uiPort: 80` dans `settings.js`, ou `PORT=80` en variable d'environnement si ton `settings.js` lit `process.env.PORT`.
 
 ajouter adminAuth dans settings.js
 
+mettre IP Statique pour FP2
 
 
 Peut être devoir installer :
